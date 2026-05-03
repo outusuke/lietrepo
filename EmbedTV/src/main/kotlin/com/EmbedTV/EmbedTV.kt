@@ -42,12 +42,12 @@ class EmbedTv : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val doc = app.get(mainSite).document
         val allCategories = mutableListOf<HomePageList>()
-        
+
         val jogosSection = doc.selectFirst(".session.futebol")
         if (jogosSection != null) {
             val jogosCards = jogosSection.select(".card")
             val jogosList = mutableListOf<SearchResponse>()
-            
+
             for (card in jogosCards) {
                 val channelId = card.attr("data-channel")
                 if (channelId.isBlank() || channelId in blockedChannels) continue
@@ -71,7 +71,7 @@ class EmbedTv : MainAPI() {
             }
 
             if (jogosList.isNotEmpty()) {
-                allCategories.add(HomePageList("📺 Jogos de Hoje", jogosList, isHorizontalImages = true))
+                allCategories.add(HomePageList("Jogos de Hoje", jogosList, isHorizontalImages = true))
             }
         }
 
@@ -118,14 +118,14 @@ class EmbedTv : MainAPI() {
         val isFromJogos = url.contains("source=jogos")
         val cleanUrl = url.replace("?source=jogos", "")
         val channelId = cleanUrl.substringAfterLast("/")
-        
+
         if (channelId in blockedChannels) {
             throw ErrorLoadingException("Canal não disponível")
         }
 
         val mainPage = app.get(mainSite).document
         val channelCard = mainPage.selectFirst(".card[data-channel=\"$channelId\"]")
-        
+
         if (channelCard == null) {
             return newMovieLoadResponse(
                 "Canal $channelId",
@@ -138,10 +138,10 @@ class EmbedTv : MainAPI() {
         }
 
         val realChannelName = channelCard.selectFirst("h3")?.text()?.trim() ?: "Canal $channelId"
-        
+
         val channelImg = channelCard.selectFirst("img")
         val defaultImage = channelImg?.attr("data-src")?.ifEmpty { channelImg.attr("src") } ?: "https://embedtv.best/assets/icon.png"
-        
+
         val displayImage = if (isFromJogos) {
             val gameCard = mainPage.selectFirst(".session.futebol .card[data-channel=\"$channelId\"]")
             val gameImg = gameCard?.selectFirst("img")
@@ -149,7 +149,7 @@ class EmbedTv : MainAPI() {
         } else {
             defaultImage
         }
-        
+
         val displayTitle = if (isFromJogos) {
             val gameCard = mainPage.selectFirst(".session.futebol .card[data-channel=\"$channelId\"]")
             val gameName = gameCard?.selectFirst("h3")?.text()?.trim() ?: realChannelName
@@ -158,7 +158,7 @@ class EmbedTv : MainAPI() {
         } else {
             realChannelName
         }
-        
+
         val plot = if (isFromJogos) {
             val gameCard = mainPage.selectFirst(".session.futebol .card[data-channel=\"$channelId\"]")
             val gameName = gameCard?.selectFirst("h3")?.text()?.trim() ?: realChannelName
@@ -226,22 +226,53 @@ class EmbedTv : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val cleanUrl = data.split("?")[0]
-        val channelUrl = cleanUrl.ifEmpty { return false }
-
+        
         return try {
             val headers = mapOf(
                 "Referer" to baseUrl,
                 "Origin" to baseUrl,
                 "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36"
             )
+
             
-            val html = app.get(channelUrl, headers = headers).text
-            val streamPattern = Regex("""stream:\s*"([^"]+\.txt)"""")
-            val streamMatch = streamPattern.find(html)
+            val html = app.get(cleanUrl, headers = headers).document
             
-            if (streamMatch != null) {
-                var streamUrl = streamMatch.groupValues[1]
-                streamUrl = streamUrl.replace("xn--d1ma04s8hp12.cloudfront.lat", "d1ma04s8hp12.cloudfront.lat")
+            
+            val scripts = html.select("script")
+            var streamUrl: String? = null
+            
+           for (script in scripts) {
+                val scriptContent = script.html()
+                
+                val m3u8Pattern = Regex("""stream:\s*"([^"]+\.m3u8)"""")
+                val m3u8Match = m3u8Pattern.find(scriptContent)
+                if (m3u8Match != null) {
+                    streamUrl = m3u8Match.groupValues[1]
+                    break
+                }
+                
+                val urlPattern = Regex("""https?://[^"'\s]+\.m3u8[^"'\s]*""")
+                val urlMatch = urlPattern.find(scriptContent)
+                if (urlMatch != null) {
+                    streamUrl = urlMatch.value
+                    break
+                }
+                
+                val txtPattern = Regex("""stream:\s*"([^"]+\.txt)"""")
+                val txtMatch = txtPattern.find(scriptContent)
+                if (txtMatch != null) {
+                    streamUrl = txtMatch.groupValues[1]
+                    break
+                }
+            }
+            
+                 if (streamUrl == null) {
+                val dataStreamElement = html.select("[data-stream]").firstOrNull()
+                streamUrl = dataStreamElement?.attr("data-stream")
+            }
+            
+            if (streamUrl != null) {
+                  streamUrl = streamUrl.replace("xn--d1ma04s8hp12.cloudfront.lat", "d1ma04s8hp12.cloudfront.lat")
                 
                 val streamHeaders = mapOf(
                     "Accept" to "*/*",
@@ -255,17 +286,30 @@ class EmbedTv : MainAPI() {
                     "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36"
                 )
                 
-                M3u8Helper.generateM3u8(
-                    name,
-                    streamUrl,
-                    baseUrl,
-                    headers = streamHeaders
-                ).forEach(callback)
-                
-                true
-            } else {
-                false
+                      if (streamUrl.endsWith(".txt")) {
+                    M3u8Helper.generateM3u8(
+                        name,
+                        streamUrl,
+                        baseUrl,
+                        headers = streamHeaders
+                    ).forEach(callback)
+                } else {
+                    callback.invoke(
+                        newExtractorLink(
+                            source = name,
+                            name = name,
+                            url = streamUrl,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = baseUrl
+                            this.headers = streamHeaders
+                        }
+                    )
+                }
+                return true
             }
+            
+            false
         } catch (e: Exception) {
             false
         }
