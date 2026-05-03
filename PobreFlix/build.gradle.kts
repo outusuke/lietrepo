@@ -39,7 +39,7 @@ fun getLocalProperty(key: String): String? {
 }
 
 cloudstream {
-    version = 1
+    version = 2
     description = "PobreFlix, assistir online, filmes, séries, animes, doramas"
     language = "pt-br"
     authors = listOf("lawlietbr")
