@@ -27,7 +27,7 @@ subprojects {
     apply(plugin = "kotlin-android")
     apply(plugin = "com.lagradost.cloudstream3.gradle")
     cloudstream {
-        setRepo("https://github.com/YOUR_USERNAME/lietrepo")
+        setRepo("https://github.com/outusuke/lietrepo")
         authors = listOf("lawlietbr")
     }
     android {
